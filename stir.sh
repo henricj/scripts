@@ -91,13 +91,14 @@ rng_stir()
 # Add entropy from given URL
 rng_add_tls()
 {
-   _rng_rekey
+   _rng_rekey || return 1
 
    # The TLS connection's master key is the important part
    rng_pool=$( \
       { echo ${rng_pool} | base64 -d && tls ${1} ; } \
       | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-      | base64 -e)
+      | base64 -e) \
+   || return 1
 
    # Prevent accidental reuse
    unset rng_key rng_iv
@@ -107,7 +108,7 @@ rng_add_tls()
 
 rng_generate()
 {
-   _rng_generate ${1}
+   _rng_generate ${1} || return 1
 
   rng_stir
 }
@@ -130,7 +131,7 @@ rng_initialize()
 
    rng_pool=$(echo ${rng_raw} | base64 -e)
 
-   rng_stir
+   rng_stir || exit 1
 
    rng_add_tls www.yahoo.com
    rng_add_tls www.eff.org
@@ -142,26 +143,23 @@ rng_initialize()
    rng_add_tls www.facebook.com
    rng_add_tls google.com
 
-   rng_stir
+   rng_stir || exit 1
 
-echo >/dev/stderr pool length: ${#rng_pool}
+#echo >/dev/stderr pool length: ${#rng_pool}
 }
 
 rng_tls()
 {
-   rng_keys
+   rng_keys || return 1
 
-   rng_update
+   rng_update || return 1
 
-   keyed_rng_tls ${1} ${2} ${rng_key} ${rng_iv} \
-      || return 1
-
-   return 0
+   keyed_rng_tls ${1} ${2} ${rng_key} ${rng_iv}
 }
 
 keyed_rng_tls()
 {
-   rng_update
+   rng_update || return 1
 
    { \
       dd if=/dev/random bs=256 count=1 2>/dev/null && \
@@ -169,10 +167,7 @@ keyed_rng_tls()
       tls ${1} ; \
    } \
          | openssl aes-256-cbc -K ${3} -iv ${4} \
-         | openssl rand -rand /dev/stdin:/dev/random -hex ${2} 2> /dev/null \
-      || return 1
-
-   return 0
+         | openssl rand -rand /dev/stdin:/dev/random -hex ${2} 2> /dev/null
 }
 
 get_keys()
@@ -197,10 +192,10 @@ fi
 #echo >/dev/stderr key is $key
 #echo >/dev/stderr stir is $stir
 
-rng_add_tls www.aclu.org
-rng_add_tls www.schneier.com
+rng_add_tls www.aclu.org || exit 1
+rng_add_tls www.schneier.com || exit 1
 
-rng_stir
+rng_stir || exit 1
 
 { \
    dd if=/dev/random bs=64 count=1 2> /dev/null && \
