@@ -45,13 +45,11 @@ _rng_generate()
 
 _rng_update()
 {
-   if [ -z "${rng_count}" ] ; then
-      rng_count=1
-   else
-      ((rng_count++))
-   fi
+   ((rng_count++))
 
    rng=$( _rng_generate_block "rng" | base64 -e )
+
+   ((rng_count++))
 }
 
 _rng_rekey()
