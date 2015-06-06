@@ -17,12 +17,14 @@ tls()
 
 _rng_generate_block()
 {
+   #echo >/dev/stderr "${1}: ${rng_count}-$HOST-$$-`date -n`"
+
    { \
-      echo ${rng} && \
-      echo ${rng_raw} && \
+      echo ${rng} | base64 -d && \
+      echo "${rng_raw}" && \
       echo ${rng_pool} | base64 -d ; \
    } \
-   | openssl dgst -hmac "${1}: $HOST-$$-${rng_count}-`date -n`" -sha512 -binary
+   | openssl dgst -hmac "${1}: ${rng_count}-$HOST-$$-`date -n`" -sha512 -binary
 }
 
 _rng_generate()
@@ -33,7 +35,7 @@ _rng_generate()
 
    { \
       _rng_generate_block "generate" && \
-      echo ${rng_raw} && \
+      echo "${rng_raw}" && \
       echo ${rng_pool} | base64 -d ; \
    } \
    | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
@@ -49,7 +51,7 @@ _rng_update()
       ((rng_count++))
    fi
 
-   rng=$( _rng_generate_block "rng" )
+   rng=$( _rng_generate_block "rng" | base64 -e )
 }
 
 _rng_rekey()
@@ -127,9 +129,11 @@ rng_initialize()
 
 #echo >/dev/stderr anu_raw: ${anu_raw}
 
-   rng_raw=${nist_raw}${random_raw}${anu_raw}
+   rng_raw="${nist_raw}
+${random_raw}
+${anu_raw}"
 
-   rng_pool=$(echo ${rng_raw} | base64 -e)
+   rng_pool=$(echo "${rng_raw}" | base64 -e)
 
    rng_stir || exit 1
 
