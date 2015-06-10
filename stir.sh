@@ -29,9 +29,9 @@ _rng_generate_block()
 
 _rng_generate()
 {
-   _rng_rekey
+   _rng_rekey || return 1
 
-   _rng_update
+   _rng_update || return 1
 
    { \
       _rng_generate_block "generate" && \
@@ -47,21 +47,21 @@ _rng_update()
 {
    ((rng_count++))
 
-   rng=$( _rng_generate_block "rng" | base64 -e )
+   rng=$( _rng_generate_block "rng" | base64 -e ) || return 1
 
    ((rng_count++))
 }
 
 _rng_rekey()
 {
-   _rng_update
+   _rng_update || return 1
 
    rng_key=$( \
       _rng_generate_block "key" \
       | openssl rand -rand /dev/stdin:/dev/random -hex 32 2> /dev/null \
-   )
+   ) || return 1
 
-   _rng_update
+   _rng_update || return 1
 
    rng_iv=$( \
       _rng_generate_block "iv" \
@@ -72,17 +72,17 @@ _rng_rekey()
 # Stir the random pool (backtracking resistance)
 rng_stir()
 {
-   _rng_rekey
+   _rng_rekey || return 1
 
    rng_pool=$( \
       { echo ${rng_pool} | base64 -d ; } \
       | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-      | base64 -e)
+      | base64 -e) || return 1
 
    # Prevent accidental reuse
-   unset rng_key rng_iv
+   unset rng_key rng_iv || return 1
   
-   _rng_update
+   _rng_update || return 1
  
    _rng_generate_block "stir" \
       | openssl rand -rand /dev/stdin:/dev/random -hex 32 2>/dev/null >/dev/null
@@ -95,13 +95,13 @@ rng_add_tls()
 
    # The TLS connection's master key is the important part
    rng_pool=$( \
-      { echo ${rng_pool} | base64 -d && tls ${1} ; } \
+      { tls ${1} && echo ${rng_pool} | base64 -d ; } \
       | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
       | base64 -e) \
    || return 1
 
    # Prevent accidental reuse
-   unset rng_key rng_iv
+   unset rng_key rng_iv || return 1
       
    rng_stir
 }
@@ -131,23 +131,26 @@ rng_initialize()
 ${random_raw}
 ${anu_raw}"
 
-   rng_pool=$(echo "${rng_raw}" | base64 -e)
+   rng_pool=$(echo "${rng_raw}" | base64 -e) || exit 1
 
    rng_stir || exit 1
 
-   rng_add_tls www.yahoo.com
-   rng_add_tls www.eff.org
-   rng_add_tls www.amazon.com
-   rng_add_tls www.microsoft.com
-   rng_add_tls www.linkedin.com
-   rng_add_tls www.startpage.com
-   rng_add_tls www.twitter.com
-   rng_add_tls www.facebook.com
-   rng_add_tls google.com
+   local allSites split
 
+   readarray -t allSites < <(sort -uR sites) || exit 1
+
+   split=$(( 2 * ${#allSites[*]} / 3 ))
+
+   sites=("${allSites[@]:${split}}")
+
+   for site in "${allSites[@]:0:${split}}"
+   do
+      rng_add_tls ${site} || exit 1
+   done
+ 
    rng_stir || exit 1
 
-#echo >/dev/stderr pool length: ${#rng_pool}
+echo >/dev/stderr pool length: ${#rng_pool}
 }
 
 rng_tls()
@@ -183,7 +186,7 @@ get_keys()
    return 0
 }
 
-rng_initialize
+rng_initialize || exit 1
 
 if ! get_keys ; then
    echo >/dev/stderr get_keys failed
@@ -194,8 +197,12 @@ fi
 #echo >/dev/stderr key is $key
 #echo >/dev/stderr stir is $stir
 
-rng_add_tls www.aclu.org || exit 1
-rng_add_tls www.schneier.com || exit 1
+rng_stir || exit 1
+  
+for site in "${sites[@]}"
+do
+   rng_add_tls ${site} || exit 1
+done
 
 rng_stir || exit 1
 
