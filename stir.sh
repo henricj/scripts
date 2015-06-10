@@ -150,7 +150,7 @@ ${anu_raw}"
  
    rng_stir || exit 1
 
-echo >/dev/stderr pool length: ${#rng_pool}
+#echo >/dev/stderr pool length: ${#rng_pool}
 }
 
 rng_tls()
