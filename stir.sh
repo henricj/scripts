@@ -218,4 +218,8 @@ rng_stir || exit 1
           | openssl dgst -sha512 -binary && \
        dd if=/dev/random bs=64 count=1' \
 ; } \
-| openssl aes-256-cbc -e -K ${key} -iv ${iv}
+| openssl aes-256-cbc -e -K ${key} -iv ${iv} \
+|| exit 1
+
+rng_stir
+
