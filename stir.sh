@@ -230,7 +230,7 @@ ${anu_raw}"
 
    local allSites
 
-   readarray -t allSites < <(sort -uR sites | head -25) || exit 1
+   readarray -t allSites < <(sort -uR sites | head -30) || exit 1
 
    local split=$(( 2 * ${#allSites[*]} / 3 ))
 
