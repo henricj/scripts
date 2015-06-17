@@ -98,7 +98,7 @@ _rng_generate()
       echo ${rng_pool} | base64 -d ; \
    } \
    | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-   | openssl dgst -sha512 -binary \
+   | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
    | openssl rand -rand /dev/stdin:/dev/random -hex ${1} 2> /dev/null
 }
 
@@ -113,6 +113,13 @@ _rng_update()
 
 _rng_rekey()
 {
+   _rng_update || exit 1
+
+   rng_hmac=$( \
+      _rng_generate_block "hmac" \
+      | openssl rand -rand /dev/stdin:/dev/random -hex 64 2> /dev/null \
+   ) || exit 1
+
    _rng_update || exit 1
 
    rng_key=$( \
