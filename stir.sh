@@ -217,20 +217,19 @@ rng_initialize()
 {
    local start_time=`date`
 
-   local nist_raw=`curl -s https://beacon.nist.gov/rest/record/last` || exit 1
+   local nist_raw random_raw anu_raw hotbits_raw
+
+   nist_raw=`curl -s https://beacon.nist.gov/rest/record/last` || exit 1
+
+   random_raw=`curl -s "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new"` || exit 1
+
+   anu_raw=`curl -s "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16"` || exit 1
+
+   hotbits_raw=`curl -s "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e` || exit 1
 
 #echo >/dev/stderr nist_raw: ${nist_raw}
-
-   local random_raw=`curl -s "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new"` || exit 1
-
 #echo >/dev/stderr random_raw: ${random_raw}
-
-   local anu_raw=`curl -s "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16"` || exit 1
-
 #echo >/dev/stderr anu_raw: ${anu_raw}
-
-   local hotbits_raw=`curl -s "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e` || exit 1
-
 #echo >/dev/stderr hotbits_raw: ${hotbits_raw}
 
    local uname=`uname -a`
