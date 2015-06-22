@@ -56,7 +56,7 @@ multi_tls()
       local site=${sites[${idx}]}
 
       if [ -z ${pid+x} ] ; then
-echo >/dev/stderr worker for ${site} has no pid
+         echo >/dev/stderr worker for ${site} has no pid
          wait
 
          exit 1 
@@ -64,7 +64,7 @@ echo >/dev/stderr worker for ${site} has no pid
 
 #echo >/dev/stderr waiting for ${site} pid ${pid}
       if ! wait ${pid} ; then
-echo >/dev/stderr worker for ${site} pid ${pid} failed
+         echo >/dev/stderr worker for ${site} pid ${pid} failed
          wait
 
          exit 1
@@ -229,6 +229,10 @@ rng_initialize()
 
 #echo >/dev/stderr anu_raw: ${anu_raw}
 
+   local hotbits_raw=`curl -s "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e` || exit 1
+
+#echo >/dev/stderr hotbits_raw: ${hotbits_raw}
+
    local uname=`uname -a`
 
    rng_raw="${start_time}
@@ -236,7 +240,8 @@ ${kern_uuid}
 ${uname}
 ${nist_raw}
 ${random_raw}
-${anu_raw}"
+${anu_raw}
+${hotbits_raw}"
 
 #echo >/dev/stderr rng_raw: "${rng_raw}"
 
