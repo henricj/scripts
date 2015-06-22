@@ -41,7 +41,7 @@ multi_tls()
       pid=$! 
 
       if [ ${ret} -ne 0 ] ; then
-         echo "Unable to read" ${site}
+         echo >/dev/stderr "Unable to read" ${site}
          wait
          exit 1
       fi
