@@ -154,7 +154,7 @@ rng_stir()
       | openssl rand -rand /dev/stdin:/dev/random -hex 32 2>/dev/null >/dev/null
 }
 
-# Add entropy from given URL
+# Add entropy from given URLs
 rng_add_tls()
 {
    local pool code
@@ -282,28 +282,6 @@ ${anu_raw}"
    rng_stir || exit 1
 
 #echo >/dev/stderr pool length: ${#rng_pool}
-}
-
-rng_tls()
-{
-   rng_keys || exit 1
-
-   rng_update || exit 1
-
-   keyed_rng_tls ${1} ${2} ${rng_key} ${rng_iv}
-}
-
-keyed_rng_tls()
-{
-   rng_update || exit 1
-
-   { \
-      dd if=/dev/random bs=256 count=1 2>/dev/null && \
-      echo ${rng} && \
-      tls ${1} ; \
-   } \
-         | openssl aes-256-cbc -K ${3} -iv ${4} \
-         | openssl rand -rand /dev/stdin:/dev/random -hex ${2} 2> /dev/null
 }
 
 get_keys()
