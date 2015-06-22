@@ -215,25 +215,57 @@ rng_generate()
 
 rng_initialize()
 {
-   nist_raw=`curl -s https://beacon.nist.gov/rest/record/last` || exit 1
+   local start_time=`date`
+
+   local nist_raw=`curl -s https://beacon.nist.gov/rest/record/last` || exit 1
 
 #echo >/dev/stderr nist_raw: ${nist_raw}
 
-   random_raw=`curl -s "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new"` || exit 1
+   local random_raw=`curl -s "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new"` || exit 1
 
 #echo >/dev/stderr random_raw: ${random_raw}
 
-   anu_raw=`curl -s "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16"` || exit 1
+   local anu_raw=`curl -s "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16"` || exit 1
 
 #echo >/dev/stderr anu_raw: ${anu_raw}
 
-   rng_raw="${nist_raw}
+   local uname=`uname -a`
+
+   rng_raw="${start_time}
+${kern_uuid}
+${uname}
+${nist_raw}
 ${random_raw}
 ${anu_raw}"
+
+#echo >/dev/stderr rng_raw: "${rng_raw}"
+
+# Note well:  All of this function's sources above this comment are
+# public.  They are meant to make sure that each run is unique and
+# uncorrelated with other runs on this or any other system.
 
    rng_pool=$(echo "${rng_raw}" | base64 -e) || exit 1
 
    rng_stir || exit 1
+
+   _rng_rekey || exit 1
+
+# The sysctl should also be considered public information.  However, it
+# is unlikely that two runs will give the same results.  We do this after
+# the first rng_stir so that rng_hmac should also be universally unique.
+   rng_pool=$( \
+         { sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
+            && echo ${rng_pool} | base64 -d ; } \
+         | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
+         | base64 -e )
+
+   rng_stir || exit 1
+
+   _rng_rekey || exit 1
+
+# At this point, rng_pool should be universally unique.  Now we'll try to
+# fetch something entropy-ish.  The whole premise is that for at least some
+# runs, at least one TLS connection is not observed.
 
    local allSites
 
