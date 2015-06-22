@@ -235,7 +235,7 @@ rng_initialize()
    local uname=`uname -a`
 
    rng_raw="${start_time}
-${kern_uuid}
+$$
 ${uname}
 ${nist_raw}
 ${random_raw}
