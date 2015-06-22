@@ -35,7 +35,7 @@ multi_tls()
    for idx in "${!sites[@]}" ; do
       local site=${sites[${idx}]}
 
-      tls ${site} &
+      tls ${site} | openssl dgst -hmac "${site}-${rng_hmac}" -sha512 -binary &
       
       ret=$?
       pid=$! 
