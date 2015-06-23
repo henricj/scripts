@@ -275,6 +275,13 @@ ${hotbits_raw}"
 
    readarray -t allSites < <(sort -uR sites | head -30) || exit 1
 
+   if [ -e sites.local ] ; then
+      readarray -t localSites < <(sort -uR sites.local) || exit 1
+      if [ ${#localSites[@]} -ne 0 ] ; then
+         rng_add_multi_tls "${localSites[@]}"
+      fi
+   fi
+
    local split=$(( 2 * ${#allSites[*]} / 3 ))
 
    sites=("${allSites[@]:${split}}")
@@ -309,6 +316,11 @@ fi
 #echo >/dev/stderr stir is $stir
 
 rng_stir || exit 1
+
+# Read the local sites again (if we have any)
+if [ ${#localSites[@]} -ne 0 ] ; then
+   rng_add_multi_tls "${localSites[@]}"
+fi
 
 rng_add_multi_tls "${sites[@]}"
 
