@@ -154,6 +154,23 @@ rng_stir()
       | openssl rand -rand /dev/stdin:/dev/random -hex 32 2>/dev/null >/dev/null
 }
 
+rng_sysctl_add_and_stir()
+{
+   rng_stir || exit 1
+
+   _rng_rekey || exit 1
+
+   rng_pool=$( \
+         { sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
+            && echo ${rng_pool} | base64 -d ; } \
+         | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
+         | base64 -e )
+
+   rng_stir || exit 1
+
+   _rng_rekey || exit 1
+}
+
 # Add entropy from given URLs
 rng_add_tls()
 {
@@ -250,22 +267,10 @@ ${hotbits_raw}"
 
    rng_pool=$(echo "${rng_raw}" | base64 -e) || exit 1
 
-   rng_stir || exit 1
-
-   _rng_rekey || exit 1
-
 # The sysctl should also be considered public information.  However, it
-# is unlikely that two runs will give the same results.  We do this after
-# the first rng_stir so that rng_hmac should also be universally unique.
-   rng_pool=$( \
-         { sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
-            && echo ${rng_pool} | base64 -d ; } \
-         | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-         | base64 -e )
+# is unlikely that two runs will give the same results.
 
-   rng_stir || exit 1
-
-   _rng_rekey || exit 1
+   rng_sysctl_add_and_stir
 
 # At this point, rng_pool should be universally unique.  Now we'll try to
 # fetch something entropy-ish.  The whole premise is that for at least some
@@ -290,9 +295,7 @@ ${hotbits_raw}"
 
    rng_add_multi_tls "${firstSites[@]}"
 
-   rng_stir || exit 1
-
-#echo >/dev/stderr pool length: ${#rng_pool}
+#echo >/dev/stderr pool length: ${#rng_pool} count: ${rng_count}
 }
 
 get_keys()
@@ -305,6 +308,8 @@ get_keys()
 }
 
 rng_initialize || exit 1
+
+rng_sysctl_add_and_stir || exit 1
 
 if ! get_keys ; then
    echo >/dev/stderr get_keys failed
@@ -324,7 +329,7 @@ fi
 
 rng_add_multi_tls "${sites[@]}"
 
-rng_stir || exit 1
+rng_sysctl_add_and_stir || exit 1
 
 { \
    dd if=/dev/random bs=64 count=1 2> /dev/null && \
@@ -340,6 +345,4 @@ rng_stir || exit 1
 ; } \
 | openssl aes-256-cbc -e -K ${key} -iv ${iv} \
 || exit 1
-
-rng_stir
 
