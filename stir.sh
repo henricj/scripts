@@ -156,7 +156,11 @@ rng_stir()
 
 rng_sysctl_add_and_stir()
 {
-   rng_stir || exit 1
+   local repeat
+
+   for ((repeat = 0; repeat < 100; ++repeat)) ; do
+      rng_stir || exit 1
+   done
 
    _rng_rekey || exit 1
 
@@ -166,7 +170,9 @@ rng_sysctl_add_and_stir()
          | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
          | base64 -e )
 
-   rng_stir || exit 1
+   for ((repeat = 0; repeat < 100; ++repeat)) ; do
+      rng_stir || exit 1
+   done
 
    _rng_rekey || exit 1
 }
