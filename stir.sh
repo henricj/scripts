@@ -270,7 +270,7 @@ ${hotbits_raw}"
 # The sysctl should also be considered public information.  However, it
 # is unlikely that two runs will give the same results.
 
-   rng_sysctl_add_and_stir
+   rng_sysctl_add_and_stir || exit 1
 
 # At this point, rng_pool should be universally unique.  Now we'll try to
 # fetch something entropy-ish.  The whole premise is that for at least some
@@ -324,10 +324,10 @@ rng_stir || exit 1
 
 # Read the local sites again (if we have any)
 if [ ${#localSites[@]} -ne 0 ] ; then
-   rng_add_multi_tls "${localSites[@]}"
+   rng_add_multi_tls "${localSites[@]}" || exit 1
 fi
 
-rng_add_multi_tls "${sites[@]}"
+rng_add_multi_tls "${sites[@]}" || exit 1
 
 rng_sysctl_add_and_stir || exit 1
 
