@@ -180,7 +180,7 @@ rng_sysctl_add_and_stir()
 # Add entropy from given URLs
 rng_add_tls()
 {
-   local pool code
+   local pool code repeat
 
    for retry in {1..3} ; do
       _rng_rekey || exit 1
@@ -193,10 +193,9 @@ rng_add_tls()
 
       code=$?
 
-      # Prevent accidental reuse
-      unset rng_key rng_iv || exit 1
-      
-      rng_stir || exit 1
+      for ((repeat = 0; repeat < 16; ++repeat)) ; do
+         rng_stir || exit 1
+      done
       
       if [ ${code} -eq 0 ] ; then
          break
