@@ -1,5 +1,13 @@
 #!/usr/local/bin/bash
 
+# Stir the openssl ~/.rnd pool by doing many PFS TLS connections
+# and hoping that at least some key exchanges are not observed.
+# We write to /dev/random as well.  Unfortunately, on FreeBSD 10
+# this is the same as writing to /dev/null (this is fixed in
+# current/11 and wasn't borked before 10).  See the random_write()
+# change here:
+#    https://svnweb.freebsd.org/base/head/sys/dev/random/randomdev.c?r1=255379&r2=256377
+
 set -o pipefail
 
 print_cipher()
@@ -180,7 +188,7 @@ rng_sysctl_add_and_stir()
 # Add entropy from given URLs
 rng_add_tls()
 {
-   local pool code repeat
+   local pool code repeat retry
 
    for retry in {1..3} ; do
       _rng_rekey || exit 1
