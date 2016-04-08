@@ -8,7 +8,8 @@
 # change here:
 #    https://svnweb.freebsd.org/base/head/sys/dev/random/randomdev.c?r1=255379&r2=256377
 
-set -o pipefail
+if [ -z "${_rng_pool_loaded}" ]; then
+_rng_pool_loaded="yes"
 
 print_cipher()
 {
@@ -106,8 +107,7 @@ _rng_generate()
       echo ${rng_pool} | base64 -d ; \
    } \
    | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-   | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
-   | openssl rand -rand /dev/stdin:/dev/random -hex ${1} 2> /dev/null
+   | openssl dgst -hmac ${rng_hmac} -sha512 -binary
 }
 
 _rng_update()
@@ -149,7 +149,7 @@ rng_stir()
    _rng_rekey || exit 1
 
    rng_pool=$( \
-      { echo ${rng_pool} | base64 -d ; } \
+      { echo ${1} | base64 -d ; echo ${rng_pool} | base64 -d ; } \
       | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
       | base64 -e) || exit 1
 
@@ -183,6 +183,59 @@ rng_sysctl_add_and_stir()
    done
 
    _rng_rekey || exit 1
+}
+
+rng_stir_with_external()
+{
+   umask 077
+
+   if [ ! -w .rng.pool ] ; then
+      if [ -e .rng.pool ] ; then
+         rm .rng.pool || exit 1
+      fi
+      openssl rand 3072 > .rng.pool 2> /dev/null || exit 1
+   fi
+
+   if [ -e .rng.pool.tmp ] ; then
+      rm .rng.pool.tmp || exit 1
+   fi
+
+   local enc_iv enc_key hmac_key repeat digest
+
+   for ((repeat = 0; repeat < 4; ++repeat)) ; do
+      enc_iv=$(rng_generate 16) || exit 1
+      enc_key=$(rng_generate 32) || exit 1
+
+      openssl enc -aes-256-ctr -nosalt -K ${enc_key} -iv ${enc_iv} \
+         -in .rng.pool -out .rng.pool.tmp \
+         2> /dev/null \
+      || exit 1
+
+      enc_iv=$(rng_generate 16) || exit 1
+      enc_key=$(rng_generate 32) || exit 1
+      hmac_key=$(rng_generate 64) || exit 1
+
+      digest=` \
+         openssl aes-256-cbc -e -K ${enc_key} -iv ${enc_iv} -in .rng.pool.tmp \
+         | openssl dgst -hmac ${hmac_key} -sha512 -binary \
+         | base64 -e
+      ` || exit 1
+
+#echo >/dev/stderr digest: ${digest}
+
+      rng_stir ${digest}
+
+      enc_iv=$(rng_generate 16) || exit 1
+      enc_key=$(rng_generate 32) || exit 1
+
+      openssl enc -aes-256-ctr -nosalt -K ${enc_key} -iv ${enc_iv} \
+         -in .rng.pool.tmp -out .rng.pool \
+         2> /dev/null \
+      || exit 1
+
+   done
+
+   rm .rng.pool.tmp
 }
 
 # Add entropy from given URLs
@@ -238,9 +291,24 @@ rng_add_multi_tls()
 
 rng_generate()
 {
-   _rng_generate ${1} || exit 1
+   _rng_generate \
+  | openssl rand -rand /dev/stdin:/dev/random -hex ${1} 2> /dev/null \
+  || exit 1
 
-  rng_stir
+  rng_stir || exit 1
+}
+
+rng_generate_binary()
+{
+   local ctr_iv=$(rng_generate 16) || exit 1
+   local ctr_key=$(rng_generate 32) || exit 1
+
+   _rng_generate \
+  | openssl rand -rand /dev/stdin:/dev/random ${1} 2> /dev/null \
+  | openssl enc -aes-256-ctr -nosalt -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
+  || exit 1
+
+  rng_stir || exit 1
 }
 
 rng_initialize()
@@ -251,11 +319,19 @@ rng_initialize()
 
    nist_raw=`curl -s https://beacon.nist.gov/rest/record/last` || exit 1
 
+#echo >/dev/stderr NIST ${#nist_raw} bytes
+
    random_raw=`curl -s "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new"` || exit 1
+
+#echo >/dev/stderr random ${#random_raw} bytes
 
    anu_raw=`curl -s "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16"` || exit 1
 
+#echo >/dev/stderr anu ${#anu_raw} bytes
+
    hotbits_raw=`curl -s "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e` || exit 1
+
+#echo >/dev/stderr hotbits ${#hotbits_raw} bytes
 
 #echo >/dev/stderr nist_raw: ${nist_raw}
 #echo >/dev/stderr random_raw: ${random_raw}
@@ -289,6 +365,8 @@ ${hotbits_raw}"
 # fetch something entropy-ish.  The whole premise is that for at least some
 # runs, at least one TLS connection is not observed.
 
+   rng_stir_with_external || exit 1
+
    local allSites
 
    readarray -t allSites < <(sort -uR sites | head -30) || exit 1
@@ -300,6 +378,8 @@ ${hotbits_raw}"
       fi
    fi
 
+   rng_stir_with_external || exit 1
+
    local split=$(( 2 * ${#allSites[*]} / 3 ))
 
    sites=("${allSites[@]:${split}}")
@@ -308,54 +388,56 @@ ${hotbits_raw}"
 
    rng_add_multi_tls "${firstSites[@]}"
 
+   rng_stir_with_external || exit 1
+
 #echo >/dev/stderr pool length: ${#rng_pool} count: ${rng_count}
 }
 
-get_keys()
+rng_update_keys()
 {
    iv=$(rng_generate 16) || exit 1
-
    key=$(rng_generate 32) || exit 1
-
    stir=$(rng_generate 64) || exit 1
 }
 
-rng_initialize || exit 1
+generate_output()
+{
+   local repeat
 
-rng_sysctl_add_and_stir || exit 1
+   for ((repeat = 0; repeat < ${1} ; ++repeat)) ; do
+      rng_generate_binary 8 || exit 1
+   done
+}
 
-if ! get_keys ; then
-   echo >/dev/stderr get_keys failed
-   exit 1
+rng_initialize_pool()
+{
+   rng_initialize || exit 1
+
+   rng_sysctl_add_and_stir || exit 1
+
+   # Read the local sites again (if we have any)
+   if [ ${#localSites[@]} -ne 0 ] ; then
+      rng_add_multi_tls "${localSites[@]}" || exit 1
+   fi
+
+   rng_add_multi_tls "${sites[@]}" || exit 1
+
+   rng_sysctl_add_and_stir || exit 1
+}
+
+rng_generate_output()
+{
+   local output_iv=$(rng_generate 16) || exit 1
+   local output_key=$(rng_generate 32) || exit 1
+
+   local ctr_iv=$(rng_generate 16) || exit 1
+   local ctr_key=$(rng_generate 32) || exit 1
+
+   generate_output ${1} \
+   | openssl enc -aes-256-ctr -nosalt -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
+   | openssl aes-256-cbc -e -K ${output_key} -iv ${output_iv} \
+   || exit 1
+}
+
 fi
-
-#echo >/dev/stderr iv is $iv
-#echo >/dev/stderr key is $key
-#echo >/dev/stderr stir is $stir
-
-rng_stir || exit 1
-
-# Read the local sites again (if we have any)
-if [ ${#localSites[@]} -ne 0 ] ; then
-   rng_add_multi_tls "${localSites[@]}" || exit 1
-fi
-
-rng_add_multi_tls "${sites[@]}" || exit 1
-
-rng_sysctl_add_and_stir || exit 1
-
-{ \
-   dd if=/dev/random bs=64 count=1 2> /dev/null && \
-   rng_generate 64 && \
-   rng_generate 64 && \
-   rng_generate 64 && \
-   { echo ${stir} && dd if=/dev/random bs=256 count=1 2> /dev/null ; } \
-   | ssh scott.private -C \
-      'openssl rand -rand /dev/random:/dev/stdin 64 && \
-       openssl rand -engine rdrand 32768 \
-          | openssl dgst -sha512 -binary && \
-       dd if=/dev/random bs=64 count=1' \
-; } \
-| openssl aes-256-cbc -e -K ${key} -iv ${iv} \
-|| exit 1
 
