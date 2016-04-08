@@ -91,8 +91,6 @@ stir_add_entropy()
 
    local entropy=`echo ${1} | base64 -d | openssl aes-256-cbc -e -K ${key} -iv ${iv} | base64 -e`
 
-echo >/dev/stderr "Adding ${#entropy} bytes of entropy: ${entropy}"
-
    rng_stir ${entropy}
 
    rng_stir_with_external
