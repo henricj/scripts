@@ -2,7 +2,7 @@
 
 set -o pipefail
 
-sudo -v
+sudo -v || exit 1
 
 . ./stir.sh
 

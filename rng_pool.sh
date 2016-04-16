@@ -41,10 +41,18 @@ multi_tls()
 
    local ret pid 
 
+   rng_stir || exit 1
+
+   _rng_rekey || exit 1
+
    for idx in "${!sites[@]}" ; do
       local site=${sites[${idx}]}
 
-      tls ${site} | openssl dgst -hmac "${site}-${rng_hmac}" -sha512 -binary &
+      _rng_update || exit 1
+
+      local site_hmac=$( _rng_generate_key ${site} ) || exit 1
+
+      tls ${site} | openssl dgst -hmac "${site}-${site_hmac}" -sha512 -binary &
       
       ret=$?
       pid=$! 
@@ -83,6 +91,15 @@ multi_tls()
    return 0
 }
 
+_rng_bin_to_hex()
+{
+   if [ -z ${1+x} ] ; then
+      hexdump -e '4/1 "%02.2x"' || exit 1
+   else
+      hexdump -e '4/1 "%02.2x"' -n ${1} || exit 1
+   fi
+}
+
 _rng_generate_block()
 {
    #echo >/dev/stderr "${1}: ${rng_count}-$HOST-$$-`date -n`"
@@ -92,10 +109,10 @@ _rng_generate_block()
       echo "${rng_raw}" && \
       echo ${rng_pool} | base64 -d ; \
    } \
-   | openssl dgst -hmac "${1}: ${rng_count}-$HOST-$$-`date -n`" -sha512 -binary
+   | openssl dgst -hmac "${1}: ${rng_count}-$HOST-$$-`date`" -sha512 -binary
 }
 
-_rng_generate()
+_rng_generate64()
 {
    _rng_rekey || exit 1
 
@@ -103,11 +120,25 @@ _rng_generate()
 
    { \
       _rng_generate_block "generate" && \
-      echo "${rng_raw}" && \
+      echo -n "${rng_raw}" && \
       echo ${rng_pool} | base64 -d ; \
    } \
-   | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-   | openssl dgst -hmac ${rng_hmac} -sha512 -binary
+   | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
+   | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
+   || exit 1
+}
+
+_rng_generate()
+{
+   local count
+
+   for ((count = ${1}; count >= 64; count -= 64)) ; do
+      _rng_generate64 || exit 1
+   done
+
+   if [ ${count} -gt 0 ] ; then
+      _rng_generate64 | dd bs=${count} count=1 2>/dev/null || exit 1
+   fi 
 }
 
 _rng_update()
@@ -119,28 +150,31 @@ _rng_update()
    ((rng_count++))
 }
 
+_rng_generate_key()
+{
+   if [ -z ${1+x} ] ; then
+      echo > /dev/stderr "_rng_generate_key() requires an argument"
+      exit 1
+   fi
+
+   _rng_generate_block ${1} | _rng_bin_to_hex ${2} || exit 1
+}
+
 _rng_rekey()
 {
    _rng_update || exit 1
 
-   rng_hmac=$( \
-      _rng_generate_block "hmac" \
-      | openssl rand -rand /dev/stdin:/dev/random -hex 64 2> /dev/null \
-   ) || exit 1
+   rng_hmac=$( _rng_generate_key "hmac" ) || exit 1
 
    _rng_update || exit 1
 
-   rng_key=$( \
-      _rng_generate_block "key" \
-      | openssl rand -rand /dev/stdin:/dev/random -hex 32 2> /dev/null \
-   ) || exit 1
+   rng_key=$( _rng_generate_key "key" 32 ) || exit 1
 
    _rng_update || exit 1
 
-   rng_iv=$( \
-      _rng_generate_block "iv" \
-      | openssl rand -rand /dev/stdin:/dev/random -hex 16 2> /dev/null \
-   )
+   rng_iv=$( _rng_generate_key "iv" 16 ) || exit 1
+
+   _rng_update || exit 1
 }
 
 # Stir the random pool (backtracking resistance)
@@ -149,17 +183,15 @@ rng_stir()
    _rng_rekey || exit 1
 
    rng_pool=$( \
-      { echo ${1} | base64 -d ; echo ${rng_pool} | base64 -d ; } \
-      | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
+      { echo -n ${1} | base64 -d | dd obs=16 conv=osync 2> /dev/null  ; \
+        echo -n ${rng_pool} | base64 -d ; } \
+      | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
       | base64 -e) || exit 1
 
    # Prevent accidental reuse
    unset rng_key rng_iv || exit 1
   
    _rng_update || exit 1
- 
-   _rng_generate_block "stir" \
-      | openssl rand -rand /dev/stdin:/dev/random -hex 32 2>/dev/null >/dev/null
 }
 
 rng_sysctl_add_and_stir()
@@ -174,8 +206,8 @@ rng_sysctl_add_and_stir()
 
    rng_pool=$( \
          { sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
-            && echo ${rng_pool} | base64 -d ; } \
-         | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
+            && echo -n ${rng_pool} | base64 -d ; } \
+         | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
          | base64 -e )
 
    for ((repeat = 0; repeat < 100; ++repeat)) ; do
@@ -189,47 +221,66 @@ rng_stir_with_external()
 {
    umask 077
 
-   if [ ! -w .rng.pool ] ; then
+   if [ ! -w .rng.pool -o ! -s .rng.pool ] ; then
       if [ -e .rng.pool ] ; then
          rm .rng.pool || exit 1
       fi
-      openssl rand 3072 > .rng.pool 2> /dev/null || exit 1
+
+      rng_generate_binary 256 \
+      | openssl rand -rand /dev/stdin:/dev/random 3072 > .rng.pool 2> /dev/null \
+      || exit 1
    fi
 
    if [ -e .rng.pool.tmp ] ; then
       rm .rng.pool.tmp || exit 1
    fi
 
-   local enc_iv enc_key hmac_key repeat digest
+   local ctr_iv ctr_key cbc_iv cbc_key hmac_key repeat digest
 
    for ((repeat = 0; repeat < 4; ++repeat)) ; do
-      enc_iv=$(rng_generate 16) || exit 1
-      enc_key=$(rng_generate 32) || exit 1
+      ctr_iv=$(rng_generate 16) || exit 1
+      ctr_key=$(rng_generate 32) || exit 1
+      cbc_iv=$(rng_generate 16) || exit 1
+      cbc_key=$(rng_generate 32) || exit 1
 
-      openssl enc -aes-256-ctr -nosalt -K ${enc_key} -iv ${enc_iv} \
-         -in .rng.pool -out .rng.pool.tmp \
+      { \
+         dd if=.rng.pool ibs=2011 skip=1 obs=4096 2>/dev/null && \
+         dd if=.rng.pool ibs=2011 count=1 2>/dev/null \
+      ; } \
+      | openssl enc -aes-256-ctr -K ${ctr_key} -iv ${ctr_iv} \
+      | openssl enc -aes-256-cbc -nopad -K ${cbc_key} -iv ${cbc_iv} -out .rng.pool.tmp \
          2> /dev/null \
       || exit 1
 
-      enc_iv=$(rng_generate 16) || exit 1
-      enc_key=$(rng_generate 32) || exit 1
+      rng_stir || exit 1
+
+      cbc_iv=$(rng_generate 16) || exit 1
+      cbc_key=$(rng_generate 32) || exit 1
       hmac_key=$(rng_generate 64) || exit 1
 
       digest=` \
-         openssl aes-256-cbc -e -K ${enc_key} -iv ${enc_iv} -in .rng.pool.tmp \
+         { dd if=/dev/random bs=256 count=1 2>/dev/null && \
+           rng_generate_binary 64 | openssl rand -rand /dev/stdin:/dev/random 256 2>/dev/null && \
+           openssl aes-256-cbc -e -K ${cbc_key} -iv ${cbc_iv} -in .rng.pool.tmp ; } \
          | openssl dgst -hmac ${hmac_key} -sha512 -binary \
-         | base64 -e
+         | base64 -e \
       ` || exit 1
 
 #echo >/dev/stderr digest: ${digest}
 
-      rng_stir ${digest}
+      rng_stir ${digest} || exit 1
 
-      enc_iv=$(rng_generate 16) || exit 1
-      enc_key=$(rng_generate 32) || exit 1
+      ctr_iv=$(rng_generate 16) || exit 1
+      ctr_key=$(rng_generate 32) || exit 1
+      cbc_iv=$(rng_generate 16) || exit 1
+      cbc_key=$(rng_generate 32) || exit 1
 
-      openssl enc -aes-256-ctr -nosalt -K ${enc_key} -iv ${enc_iv} \
-         -in .rng.pool.tmp -out .rng.pool \
+      { \
+         dd if=.rng.pool.tmp ibs=1031 skip=1 obs=4096 2>/dev/null && \
+         dd if=.rng.pool.tmp ibs=1031 count=1 2>/dev/null \
+      ; } \
+      | openssl enc -aes-256-ctr -K ${ctr_key} -iv ${ctr_iv} -nopad \
+      | openssl enc -aes-256-cbc -nopad -K ${cbc_key} -iv ${cbc_iv} -out .rng.pool \
          2> /dev/null \
       || exit 1
 
@@ -244,19 +295,10 @@ rng_add_tls()
    local pool code repeat retry
 
    for retry in {1..3} ; do
-      _rng_rekey || exit 1
-
       # The TLS connection's master key is the important part
-      pool=$( \
-         { multi_tls "${@}" && echo ${rng_pool} | base64 -d ; } \
-         | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} \
-         | base64 -e )
+      pool=$( multi_tls "${@}" | base64 -e )
 
       code=$?
-
-      for ((repeat = 0; repeat < 16; ++repeat)) ; do
-         rng_stir || exit 1
-      done
       
       if [ ${code} -eq 0 ] ; then
          break
@@ -271,7 +313,7 @@ rng_add_tls()
       exit 1
    fi
 
-   rng_pool=${pool} 
+   rng_stir ${pool}
 
    return 0
 }
@@ -289,26 +331,33 @@ rng_add_multi_tls()
    done
 }
 
-rng_generate()
+rng_generate_binary()
 {
-   _rng_generate \
-  | openssl rand -rand /dev/stdin:/dev/random -hex ${1} 2> /dev/null \
+   _rng_update || exit 1
+   local ctr_iv=$(_rng_generate_key "ctr_iv" 16) || exit 1
+
+   _rng_update || exit 1
+   local ctr_key=$(_rng_generate_key "ctr_key" 32) || exit 1
+
+   _rng_update || exit 1
+   local cbc_iv=$(_rng_generate_key "cbc_iv" 16) || exit 1
+
+   _rng_update || exit 1
+   local cbc_key=$(_rng_generate_key "cbc_key" 32) || exit 1
+
+   _rng_update || exit 1
+
+   _rng_generate ${1} \
+  | openssl enc -aes-256-ctr -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
+  | openssl enc -aes-256-cbc -nopad -K ${cbc_key} -iv ${cbc_iv} 2> /dev/null \
   || exit 1
 
   rng_stir || exit 1
 }
 
-rng_generate_binary()
+rng_generate()
 {
-   local ctr_iv=$(rng_generate 16) || exit 1
-   local ctr_key=$(rng_generate 32) || exit 1
-
-   _rng_generate \
-  | openssl rand -rand /dev/stdin:/dev/random ${1} 2> /dev/null \
-  | openssl enc -aes-256-ctr -nosalt -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
-  || exit 1
-
-  rng_stir || exit 1
+   rng_generate_binary ${1} | _rng_bin_to_hex || exit 1
 }
 
 rng_initialize()
@@ -348,13 +397,15 @@ ${random_raw}
 ${anu_raw}
 ${hotbits_raw}"
 
+   rng_raw=$(echo "${rng_raw}" | dd obs=16 fillchar=x conv=osync 2>/dev/null ) || exit 1
+
 #echo >/dev/stderr rng_raw: "${rng_raw}"
 
 # Note well:  All of this function's sources above this comment are
 # public.  They are meant to make sure that each run is unique and
 # uncorrelated with other runs on this or any other system.
 
-   rng_pool=$(echo "${rng_raw}" | base64 -e) || exit 1
+   rng_pool=$(echo -n "${rng_raw}" | base64 -e) || exit 1
 
 # The sysctl should also be considered public information.  However, it
 # is unlikely that two runs will give the same results.
@@ -405,7 +456,7 @@ generate_output()
    local repeat
 
    for ((repeat = 0; repeat < ${1} ; ++repeat)) ; do
-      rng_generate_binary 8 || exit 1
+      rng_generate_binary 16 || exit 1
    done
 }
 
@@ -423,6 +474,8 @@ rng_initialize_pool()
    rng_add_multi_tls "${sites[@]}" || exit 1
 
    rng_sysctl_add_and_stir || exit 1
+
+   rng_stir_with_external || exit 1
 }
 
 rng_generate_output()
@@ -435,7 +488,7 @@ rng_generate_output()
 
    generate_output ${1} \
    | openssl enc -aes-256-ctr -nosalt -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
-   | openssl aes-256-cbc -e -K ${output_key} -iv ${output_iv} \
+   | openssl aes-256-cbc -e -K ${output_key} -iv ${output_iv} -nopad \
    || exit 1
 }
 

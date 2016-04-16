@@ -19,7 +19,7 @@ _stir_with_scott()
 {
    local scott_blob=` \
    { rng_generate_output 4 && dd if=/dev/random bs=256 count=1 2> /dev/null ; } \
-   | ssh scott.private -C \
+   | ssh scott.private -C 2>/dev/null \
       'openssl rand -rand /dev/random:/dev/stdin 64 && \
        openssl rand -engine rdrand 32768 \
           | openssl dgst -sha512 -binary && \
