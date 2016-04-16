@@ -74,11 +74,11 @@ stir_generate_output()
    { \
       for ((repeat = 0; repeat < ${count}; ++repeat)) ; do \
          dd if=/dev/random bs=64 count=1 2> /dev/null && \
-         rng_generate_output 4 && \
-         rng_generate_output 2 | openssl rand -rand /dev/random:/dev/stdin 64 2> /dev/null \
+         rng_generate_output 8 && \
+         rng_generate_output 4 | openssl rand -rand /dev/random:/dev/stdin 64 2> /dev/null \
       ; done \
    ; } \
-   | openssl aes-256-cbc -e -K ${key} -iv ${iv} \
+   | openssl aes-256-cbc -e -K ${key} -iv ${iv} -nopad \
    || exit 1
 
    rng_stir_with_external
