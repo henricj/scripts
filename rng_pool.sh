@@ -451,7 +451,7 @@ rng_update_keys()
    stir=$(rng_generate 64) || exit 1
 }
 
-generate_output()
+_rng_generate_output()
 {
    local repeat
 
@@ -486,7 +486,7 @@ rng_generate_output()
    local ctr_iv=$(rng_generate 16) || exit 1
    local ctr_key=$(rng_generate 32) || exit 1
 
-   generate_output ${1} \
+   _rng_generate_output ${1} \
    | openssl enc -aes-256-ctr -nosalt -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
    | openssl aes-256-cbc -e -K ${output_key} -iv ${output_iv} -nopad \
    || exit 1
