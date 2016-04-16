@@ -107,10 +107,10 @@ _rng_generate_block()
 #echo >/dev/stderr "${hmac_string}"
 
    { \
-      echo ${rng} | base64 -d && \
-      echo ${2} && \
+      echo "${rng}" | base64 -d && \
+      echo -n "${2}" && \
       echo "${rng_raw}" && \
-      echo ${rng_pool} | base64 -d ; \
+      echo "${rng_pool}" | base64 -d ; \
    } \
    | openssl dgst -hmac "${hmac_string}" -sha512 -binary
 }
@@ -124,7 +124,7 @@ _rng_generate64()
    { \
       _rng_generate_block "generate" && \
       echo -n "${rng_raw}" && \
-      echo ${rng_pool} | base64 -d ; \
+      echo "${rng_pool}" | base64 -d ; \
    } \
    | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
    | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
@@ -191,6 +191,21 @@ _rng_rekey_stir()
    rng_stir_iv=$( _rng_generate_key "stir_iv" 16 ${rng_stir_iv} ) || exit 1
 }
 
+_rng_stir_kernel()
+{
+   # The check for 141 is to ignore the SIGPIPE from the dd closing
+   # the pipe before the base64 is done
+   {
+      echo -n "${1}" | base64 -d | dd obs=16 conv=osync 2> /dev/null ;
+      echo -n "${rng_pool}" | base64 -d | dd ibs=331 skip=1 obs=4096 2>/dev/null &&
+      { echo -n "${rng_pool}" || test $? -eq 141 ; } | { base64 -d || test $? -eq 141 ; } | dd ibs=331 count=1 2>/dev/null ;
+   } \
+   | openssl aes-256-ctr -e -K ${rng_stir_key} -iv ${rng_stir_iv} \
+   | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
+   | base64 -e
+}
+
+
 # Stir the random pool (backtracking resistance)
 rng_stir()
 {
@@ -198,15 +213,7 @@ rng_stir()
 
    _rng_rekey || exit 1
 
-   rng_pool=$( \
-      { \
-         echo -n ${1} | base64 -d | dd obs=16 conv=osync 2> /dev/null ; \
-         echo -n ${rng_pool} | base64 -d | dd ibs=331 skip=1 obs=4096 2>/dev/null && \
-         echo -n ${rng_pool} | base64 -d | dd ibs=331 count=1 2>/dev/null ; \
-      } \
-      | openssl aes-256-ctr -e -K ${rng_stir_key} -iv ${rng_stir_iv} \
-      | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
-      | base64 -e) || exit 1
+   rng_pool=$( _rng_stir_kernel ${1} ) || exit 1
 
    # Prevent accidental reuse
    _rng_rekey || exit 1
@@ -227,8 +234,8 @@ rng_sysctl_add_and_stir()
    rng_pool=$( \
          { \
             sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary && \
-            echo -n ${rng_pool} | base64 -d | dd ibs=113 skip=1 obs=4096 2>/dev/null && \
-            echo -n ${rng_pool} | base64 -d | dd ibs=113 count=1 2>/dev/null ; \
+            echo -n "${rng_pool}" | base64 -d | dd ibs=113 skip=1 obs=4096 2>/dev/null && \
+            { echo -n "${rng_pool}" || test $? -eq 141 ; } | { base64 -d || test $? -eq 141 ; } | dd ibs=113 count=1 2>/dev/null ; \
          } \
          | openssl aes-256-ctr -e -K ${rng_stir_key} -iv ${rng_stir_iv} \
          | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
