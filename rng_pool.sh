@@ -102,14 +102,17 @@ _rng_bin_to_hex()
 
 _rng_generate_block()
 {
-   #echo >/dev/stderr "${1}: ${rng_count}-$HOST-$$-`date -n`"
+  local hmac_string="${1}: ${rng_count}-$HOST-$$-`date`"
+
+#echo >/dev/stderr "${hmac_string}"
 
    { \
       echo ${rng} | base64 -d && \
+      echo ${2} && \
       echo "${rng_raw}" && \
       echo ${rng_pool} | base64 -d ; \
    } \
-   | openssl dgst -hmac "${1}: ${rng_count}-$HOST-$$-`date`" -sha512 -binary
+   | openssl dgst -hmac "${hmac_string}" -sha512 -binary
 }
 
 _rng_generate64()
@@ -157,41 +160,56 @@ _rng_generate_key()
       exit 1
    fi
 
-   _rng_generate_block ${1} | _rng_bin_to_hex ${2} || exit 1
+   _rng_generate_block ${1} ${3} | _rng_bin_to_hex ${2} || exit 1
 }
 
 _rng_rekey()
 {
    _rng_update || exit 1
 
-   rng_hmac=$( _rng_generate_key "hmac" ) || exit 1
+   rng_hmac=$( _rng_generate_key "hmac" 64 ${rng_hmac} ) || exit 1
 
    _rng_update || exit 1
 
-   rng_key=$( _rng_generate_key "key" 32 ) || exit 1
+   rng_key=$( _rng_generate_key "key" 32 ${rng_key} ) || exit 1
 
    _rng_update || exit 1
 
-   rng_iv=$( _rng_generate_key "iv" 16 ) || exit 1
+   rng_iv=$( _rng_generate_key "iv" 16 ${rng_iv} ) || exit 1
 
    _rng_update || exit 1
+}
+
+_rng_rekey_stir()
+{
+   _rng_update || exit 1
+
+   rng_stir_key=$( _rng_generate_key "stir_key" 32 ${rng_stir_key} ) || exit 1
+
+   _rng_update || exit 1
+
+   rng_stir_iv=$( _rng_generate_key "stir_iv" 16 ${rng_stir_iv} ) || exit 1
 }
 
 # Stir the random pool (backtracking resistance)
 rng_stir()
 {
+   _rng_rekey_stir || exit 1
+
    _rng_rekey || exit 1
 
    rng_pool=$( \
-      { echo -n ${1} | base64 -d | dd obs=16 conv=osync 2> /dev/null  ; \
-        echo -n ${rng_pool} | base64 -d ; } \
+      { \
+         echo -n ${1} | base64 -d | dd obs=16 conv=osync 2> /dev/null ; \
+         echo -n ${rng_pool} | base64 -d | dd ibs=331 skip=1 obs=4096 2>/dev/null && \
+         echo -n ${rng_pool} | base64 -d | dd ibs=331 count=1 2>/dev/null ; \
+      } \
+      | openssl aes-256-ctr -e -K ${rng_stir_key} -iv ${rng_stir_iv} \
       | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
       | base64 -e) || exit 1
 
    # Prevent accidental reuse
-   unset rng_key rng_iv || exit 1
-  
-   _rng_update || exit 1
+   _rng_rekey || exit 1
 }
 
 rng_sysctl_add_and_stir()
@@ -202,11 +220,17 @@ rng_sysctl_add_and_stir()
       rng_stir || exit 1
    done
 
+   _rng_rekey_stir || exit 1
+
    _rng_rekey || exit 1
 
    rng_pool=$( \
-         { sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary \
-            && echo -n ${rng_pool} | base64 -d ; } \
+         { \
+            sysctl -ba | openssl dgst -hmac ${rng_hmac} -sha512 -binary && \
+            echo -n ${rng_pool} | base64 -d | dd ibs=113 skip=1 obs=4096 2>/dev/null && \
+            echo -n ${rng_pool} | base64 -d | dd ibs=113 count=1 2>/dev/null ; \
+         } \
+         | openssl aes-256-ctr -e -K ${rng_stir_key} -iv ${rng_stir_iv} \
          | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
          | base64 -e )
 
