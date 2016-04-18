@@ -193,16 +193,18 @@ _rng_rekey_stir()
 
 _rng_stir_kernel()
 {
-   # The check for 141 is to ignore the SIGPIPE from the dd closing
+{   # The check for 141 is to ignore the SIGPIPE from the dd closing
    # the pipe before the base64 is done
    {
-      echo -n "${1}" | base64 -d | dd obs=16 conv=osync 2> /dev/null ;
-      echo -n "${rng_pool}" | base64 -d | dd ibs=331 skip=1 obs=4096 2>/dev/null &&
+      { echo -n "${1}" || test $? -eq 141 ; } | { base64 -d || test $? -eq 141 ; } | dd obs=16 conv=osync 2> /dev/null ;
+      { echo -n "${rng_pool}" || test $? -eq 141 ; } | { base64 -d || test $? -eq 141 ; } | dd ibs=331 skip=1 obs=4096 2>/dev/null &&
       { echo -n "${rng_pool}" || test $? -eq 141 ; } | { base64 -d || test $? -eq 141 ; } | dd ibs=331 count=1 2>/dev/null ;
    } \
    | openssl aes-256-ctr -e -K ${rng_stir_key} -iv ${rng_stir_iv} \
    | openssl aes-256-cbc -e -K ${rng_key} -iv ${rng_iv} -nopad \
-   | base64 -e
+   | base64 -e ; } \
+   || test $? -eq 141 \
+   || exit 1
 }
 
 
