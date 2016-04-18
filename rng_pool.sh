@@ -290,7 +290,8 @@ rng_stir_with_external()
       hmac_key=$(rng_generate 64) || exit 1
 
       digest=` \
-         { dd if=/dev/random bs=256 count=1 2>/dev/null && \
+         { rng_generate_binary 64 > /dev/random && \
+           dd if=/dev/random bs=256 count=1 2>/dev/null && \
            rng_generate_binary 64 | openssl rand -rand /dev/stdin:/dev/random 256 2>/dev/null && \
            openssl aes-256-cbc -e -K ${cbc_key} -iv ${cbc_iv} -in .rng.pool.tmp ; } \
          | openssl dgst -hmac ${hmac_key} -sha512 -binary \
