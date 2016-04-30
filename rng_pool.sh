@@ -394,42 +394,78 @@ rng_generate()
    rng_generate_binary ${1} | _rng_bin_to_hex || exit 1
 }
 
+_rng_fetch_url()
+{
+   curl -s ${1} && return 0
+
+   echo >/dev/stderr "Unable to fetch ${1}"
+
+   return 1
+}
+
+_rng_fetch_all()
+{
+   local nist_pid nist_ret random_pid random_ret anu_pid anu_ret hotbits_pid hotbits_ret
+
+   _rng_fetch_url https://beacon.nist.gov/rest/record/last &
+
+   nist_ret=$?
+   nist_pid=$!
+
+   _rng_fetch_url "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new" &
+
+   random_ret=$?
+   random_pid=$!
+
+   _rng_fetch_url "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16" &
+
+   anu_ret=$?
+   anu_pid=$!
+
+   _rng_fetch_url "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e &
+
+   hotbits_ret=$?
+   hotbits_pid=$!
+
+   if [ ${nist_ret} -ne 0 ] || ! wait ${nist_pid} ; then
+      echo >/dev/stderr "Unable to read nist" 
+      wait
+      exit 1
+   fi
+
+   if [ ${random_ret} -ne 0 ] || ! wait ${random_pid} ; then
+      echo >/dev/stderr "Unable to read random" 
+      wait
+      exit 1
+   fi
+
+   if [ ${anu_ret} -ne 0 ] || ! wait ${anu_pid} ; then
+      echo >/dev/stderr "Unable to read anu" 
+      wait
+      exit 1
+   fi
+
+   if [ ${hotbits_ret} -ne 0 ] || ! wait ${hotbits_pid} ; then
+      echo >/dev/stderr "Unable to read hotbits" 
+      wait
+      exit 1
+   fi
+}
+
 rng_initialize()
 {
    local start_time=`date`
 
-   local nist_raw random_raw anu_raw hotbits_raw
+   local public_entropy
 
-   nist_raw=`curl -s https://beacon.nist.gov/rest/record/last` || exit 1
-
-#echo >/dev/stderr NIST ${#nist_raw} bytes
-
-   random_raw=`curl -s "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new"` || exit 1
-
-#echo >/dev/stderr random ${#random_raw} bytes
-
-   anu_raw=`curl -s "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16"` || exit 1
-
-#echo >/dev/stderr anu ${#anu_raw} bytes
-
-   hotbits_raw=`curl -s "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e` || exit 1
-
-#echo >/dev/stderr hotbits ${#hotbits_raw} bytes
-
-#echo >/dev/stderr nist_raw: ${nist_raw}
-#echo >/dev/stderr random_raw: ${random_raw}
-#echo >/dev/stderr anu_raw: ${anu_raw}
-#echo >/dev/stderr hotbits_raw: ${hotbits_raw}
+   public_entropy=$(_rng_fetch_all) || exit 1
 
    local uname=`uname -a`
 
    rng_raw="${start_time}
 $$
 ${uname}
-${nist_raw}
-${random_raw}
-${anu_raw}
-${hotbits_raw}"
+${public_entropy}"
 
    rng_raw=$(echo "${rng_raw}" | dd obs=16 fillchar=x conv=osync 2>/dev/null ) || exit 1
 
