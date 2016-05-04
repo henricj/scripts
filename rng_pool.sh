@@ -52,7 +52,7 @@ multi_tls()
 
       local site_hmac=$( _rng_generate_key ${site} ) || exit 1
 
-      tls ${site} | openssl dgst -hmac "${site}-${site_hmac}" -sha512 -binary &
+      tls ${site} | openssl dgst -hmac "${site}-${site_hmac}-$$" -sha512 -binary &
       
       ret=$?
       pid=$! 
