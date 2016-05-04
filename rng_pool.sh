@@ -30,7 +30,7 @@ print_cipher()
 
 tls()
 {
-   openssl s_client -connect ${1}:443 -no_ssl2 -no_ssl3 -CAfile /usr/local/etc/ssl/cert.pem < /dev/null 2>/dev/null \
+   timeout 10 openssl s_client -connect ${1}:443 -no_ssl2 -no_ssl3 -CAfile /usr/local/etc/ssl/cert.pem < /dev/null 2>/dev/null \
          | tee >( print_cipher ${1} ) \
       && return 0
 
