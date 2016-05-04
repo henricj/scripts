@@ -281,9 +281,13 @@ rng_stir_with_external()
    local ctr_iv ctr_key cbc_iv cbc_key hmac_key repeat digest
 
    for ((repeat = 0; repeat < 4; ++repeat)) ; do
+      _rng_rekey || exit 1
       ctr_iv=$(rng_generate 16) || exit 1
+      _rng_rekey || exit 1
       ctr_key=$(rng_generate 32) || exit 1
+      _rng_rekey || exit 1
       cbc_iv=$(rng_generate 16) || exit 1
+      _rng_rekey || exit 1
       cbc_key=$(rng_generate 32) || exit 1
 
       { \
@@ -297,9 +301,14 @@ rng_stir_with_external()
 
       rng_stir || exit 1
 
+      _rng_rekey || exit 1
       cbc_iv=$(rng_generate 16) || exit 1
+      _rng_rekey || exit 1
       cbc_key=$(rng_generate 32) || exit 1
+      _rng_rekey || exit 1
       hmac_key=$(rng_generate 64) || exit 1
+
+      rng_stir || exit 1
 
       digest=` \
          { rng_generate_binary 64 > /dev/random && \
@@ -314,9 +323,13 @@ rng_stir_with_external()
 
       rng_stir ${digest} || exit 1
 
+      _rng_rekey || exit 1
       ctr_iv=$(rng_generate 16) || exit 1
+      _rng_rekey || exit 1
       ctr_key=$(rng_generate 32) || exit 1
+      _rng_rekey || exit 1
       cbc_iv=$(rng_generate 16) || exit 1
+      _rng_rekey || exit 1
       cbc_key=$(rng_generate 32) || exit 1
 
       { \
@@ -341,6 +354,8 @@ rng_add_tls()
    local pool code repeat retry
 
    for retry in {1..3} ; do
+      rng_stir || exit 1
+
       # The TLS connection's master key is the important part
       pool=$( multi_tls "${@}" | base64 -e )
 
@@ -530,9 +545,16 @@ ${public_entropy}"
 
 rng_update_keys()
 {
+   rng_stir || exit 1
+
+   _rng_rekey || exit 1
    iv=$(rng_generate 16) || exit 1
+   _rng_rekey || exit 1
    key=$(rng_generate 32) || exit 1
+   _rng_rekey || exit 1
    stir=$(rng_generate 64) || exit 1
+
+   rng_stir || exit 1
 }
 
 _rng_generate_output()
@@ -564,16 +586,25 @@ rng_initialize_pool()
 
 rng_generate_output()
 {
+   rng_stir || exit 1
+
+   _rng_rekey || exit 1
    local output_iv=$(rng_generate 16) || exit 1
+   _rng_rekey || exit 1
    local output_key=$(rng_generate 32) || exit 1
 
+   _rng_rekey || exit 1
    local ctr_iv=$(rng_generate 16) || exit 1
+   _rng_rekey || exit 1
    local ctr_key=$(rng_generate 32) || exit 1
 
+   _rng_rekey || exit 1
    _rng_generate_output ${1} \
    | openssl enc -aes-256-ctr -nosalt -K ${ctr_key} -iv ${ctr_iv} 2> /dev/null \
    | openssl aes-256-cbc -e -K ${output_key} -iv ${output_iv} -nopad \
    || exit 1
+
+   rng_stir || exit 1
 }
 
 fi
