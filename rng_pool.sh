@@ -19,7 +19,13 @@ print_cipher()
       return 1
    fi
 
-   printf "TLS %s (%s)\n" ${1} ${cipher} >/dev/stderr
+   if [[ ${cipher} == DHE-* ]] || [[ ${cipher} == ECDHE-* ]] ; then
+      echo -n . > /dev/stderr
+   else
+      printf "TLS %s (%s)\n" ${1} ${cipher} >/dev/stderr
+   fi
+
+   return 0
 }
 
 tls()
@@ -87,6 +93,8 @@ multi_tls()
          exit 1
       fi
    done
+
+   echo >/dev/stderr
 
    return 0
 }
@@ -248,6 +256,8 @@ rng_sysctl_add_and_stir()
    done
 
    _rng_rekey || exit 1
+
+   echo -n S
 }
 
 rng_stir_with_external()
@@ -321,6 +331,8 @@ rng_stir_with_external()
    done
 
    rm .rng.pool.tmp
+
+   echo -n E
 }
 
 # Add entropy from given URLs
@@ -407,22 +419,22 @@ _rng_fetch_all()
 {
    local nist_pid nist_ret random_pid random_ret anu_pid anu_ret hotbits_pid hotbits_ret
 
-   _rng_fetch_url https://beacon.nist.gov/rest/record/last &
+   _rng_fetch_url https://beacon.nist.gov/rest/record/last && echo -n >/dev/stderr N &
 
    nist_ret=$?
    nist_pid=$!
 
-   _rng_fetch_url "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new" &
+   _rng_fetch_url "https://www.random.org/integers/?num=20&min=-1000000000&max=1000000000&col=1&base=16&format=plain&rnd=new" && echo -n >/dev/stderr R &
 
    random_ret=$?
    random_pid=$!
 
-   _rng_fetch_url "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16" &
+   _rng_fetch_url "https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16" && echo -n >/dev/stderr A &
 
    anu_ret=$?
    anu_pid=$!
 
-   _rng_fetch_url "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e &
+   _rng_fetch_url "https://www.fourmilab.ch/cgi-bin/Hotbits?nbytes=64&fmt=bin&npass=1&lpass=8&pwtype=3" | base64 -e && echo -n >/dev/stderr H &
 
    hotbits_ret=$?
    hotbits_pid=$!
@@ -450,6 +462,8 @@ _rng_fetch_all()
       wait
       exit 1
    fi
+
+   echo >/dev/stderr
 }
 
 rng_initialize()
