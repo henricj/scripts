@@ -35,12 +35,12 @@ stir_initialize()
    if [ -z "${_stir_initialized}" ] ; then
       _stir_initialized="true"
 
-      rng_initialize_pool
+      rng_initialize_pool || exit 1
 
       _stir_with_scott
    fi
 
-   rng_stir_with_external
+   rng_reseed_pool || exit 1
 }
 
 stir_generate_entropy_files()

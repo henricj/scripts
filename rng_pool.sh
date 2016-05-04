@@ -41,11 +41,9 @@ tls()
 
 multi_tls()
 {
-   local pids idx sites=(${@})
+   local pids idx ret pid failures=0 sites=(${@})
 
-#echo >/dev/stderr multi_tls sites "${sites[@]}" indexes "${!sites[@]}"
-
-   local ret pid 
+#echo >/dev/stderr multi_tls sites "${sites[@]}" # indexes "${!sites[@]}"
 
    rng_stir || exit 1
 
@@ -88,9 +86,15 @@ multi_tls()
 #echo >/dev/stderr waiting for ${site} pid ${pid}
       if ! wait ${pid} ; then
          echo >/dev/stderr worker for ${site} pid ${pid} failed
-         wait
 
-         exit 1
+         ((++failures))
+
+         if [ ${failures} -ge 2 ]; then      
+            echo >/dev/stderr Giving up
+            wait
+
+            exit 1
+         fi
       fi
    done
 
@@ -379,14 +383,14 @@ rng_add_tls()
    return 0
 }
 
-rng_add_multi_tls()
+_rng_add_multi_tls()
 {
    local all=(${@})
 
    while [ ${#all[@]} -ne 0 ] ; do
-      local batch=("${all[@]:0:9}")
+      local batch=("${all[@]:0:68}")
 
-      all=("${all[@]:9}")
+      all=("${all[@]:68}")
 
       rng_add_tls "${batch[@]}"
    done
@@ -481,6 +485,25 @@ _rng_fetch_all()
    echo >/dev/stderr
 }
 
+rng_stir_with_sites()
+{
+   local allSites localSites
+
+   readarray -t allSites < <(sort -uR sites* | head -${1:-30}) || exit 1
+
+   # If we have a sites.local, we make sure to use all of them.
+   # Since they get included in allSites, it is possible that
+   # some will be reused.
+   if [ -e sites.local ] ; then
+      readarray -t localSites < <(sort -uR sites.local) || exit 1
+      if [ ${#localSites[@]} -ne 0 ] ; then
+         _rng_add_multi_tls "${localSites[@]}" || exit 1
+      fi
+   fi
+
+   _rng_add_multi_tls "${allSites[@]}"
+}
+
 rng_initialize()
 {
    local start_time=`date`
@@ -514,29 +537,9 @@ ${public_entropy}"
 # At this point, rng_pool should be universally unique.  Now we'll try to
 # fetch something entropy-ish.  The whole premise is that for at least some
 # runs, at least one TLS connection is not observed.
-
    rng_stir_with_external || exit 1
 
-   local allSites
-
-   readarray -t allSites < <(sort -uR sites | head -30) || exit 1
-
-   if [ -e sites.local ] ; then
-      readarray -t localSites < <(sort -uR sites.local) || exit 1
-      if [ ${#localSites[@]} -ne 0 ] ; then
-         rng_add_multi_tls "${localSites[@]}"
-      fi
-   fi
-
-   rng_stir_with_external || exit 1
-
-   local split=$(( 2 * ${#allSites[*]} / 3 ))
-
-   sites=("${allSites[@]:${split}}")
-
-   local firstSites=("${allSites[@]:0:${split}}")
-
-   rng_add_multi_tls "${firstSites[@]}"
+   rng_stir_with_sites 500 || exit 1
 
    rng_stir_with_external || exit 1
 
@@ -566,22 +569,23 @@ _rng_generate_output()
    done
 }
 
-rng_initialize_pool()
+rng_reseed_pool()
 {
-   rng_initialize || exit 1
-
    rng_sysctl_add_and_stir || exit 1
 
-   # Read the local sites again (if we have any)
-   if [ ${#localSites[@]} -ne 0 ] ; then
-      rng_add_multi_tls "${localSites[@]}" || exit 1
-   fi
-
-   rng_add_multi_tls "${sites[@]}" || exit 1
+   rng_stir_with_sites 200 || exit 1
 
    rng_sysctl_add_and_stir || exit 1
 
    rng_stir_with_external || exit 1
+}
+
+
+rng_initialize_pool()
+{
+   rng_initialize || exit 1
+
+   rng_reseed_pool || exit 1
 }
 
 rng_generate_output()
