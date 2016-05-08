@@ -56,7 +56,7 @@ multi_tls()
 
       local site_hmac=$( _rng_generate_key ${site} ) || exit 1
 
-      tls ${site} | openssl dgst -hmac "${site}-${site_hmac}-$$" -sha512 -binary &
+      tls ${site} | openssl dgst -hmac "${site}-${site_hmac}-${BASHPID}" -sha512 -binary &
       
       ret=$?
       pid=$! 
@@ -114,7 +114,7 @@ _rng_bin_to_hex()
 
 _rng_generate_block()
 {
-  local hmac_string="${1}: ${rng_count}-$HOST-$$-`date`"
+  local hmac_string="${1}: ${rng_count}-$HOST-${BASHPID}-`date`"
 
 #echo >/dev/stderr "${hmac_string}"
 
@@ -515,7 +515,7 @@ rng_initialize()
    local uname=`uname -a`
 
    rng_raw="${start_time}
-$$
+${BASHPID}
 ${uname}
 ${public_entropy}"
 
