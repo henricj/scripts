@@ -427,7 +427,7 @@ rng_generate()
 
 _rng_fetch_url()
 {
-   curl -s ${1} && return 0
+   timeout 12 curl -s ${1} && return 0
 
    echo >/dev/stderr "Unable to fetch ${1}"
 
@@ -458,28 +458,58 @@ _rng_fetch_all()
    hotbits_ret=$?
    hotbits_pid=$!
 
+   local failures=0
+
    if [ ${nist_ret} -ne 0 ] || ! wait ${nist_pid} ; then
       echo >/dev/stderr "Unable to read nist" 
-      wait
-      exit 1
+
+      ((++failures))
+
+      if [ ${failures} -ge 2 ]; then      
+         echo >/dev/stderr Giving up
+         wait
+
+         exit 1
+      fi
    fi
 
    if [ ${random_ret} -ne 0 ] || ! wait ${random_pid} ; then
       echo >/dev/stderr "Unable to read random" 
-      wait
-      exit 1
+
+      ((++failures))
+
+      if [ ${failures} -ge 2 ]; then      
+         echo >/dev/stderr Giving up
+         wait
+
+         exit 1
+      fi
    fi
 
    if [ ${anu_ret} -ne 0 ] || ! wait ${anu_pid} ; then
       echo >/dev/stderr "Unable to read anu" 
-      wait
-      exit 1
+
+      ((++failures))
+
+      if [ ${failures} -ge 2 ]; then      
+         echo >/dev/stderr Giving up
+         wait
+
+         exit 1
+      fi
    fi
 
    if [ ${hotbits_ret} -ne 0 ] || ! wait ${hotbits_pid} ; then
       echo >/dev/stderr "Unable to read hotbits" 
-      wait
-      exit 1
+
+      ((++failures))
+
+      if [ ${failures} -ge 2 ]; then      
+         echo >/dev/stderr Giving up
+         wait
+
+         exit 1
+      fi
    fi
 
    echo >/dev/stderr
