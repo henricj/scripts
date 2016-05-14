@@ -89,7 +89,7 @@ multi_tls()
 
          ((++failures))
 
-         if [ ${failures} -ge 2 ]; then      
+         if [ ${failures} -ge $(( ${#sites[@]} / 4 + 1 )) ]; then      
             echo >/dev/stderr Giving up
             wait
 
@@ -268,6 +268,12 @@ rng_stir_with_external()
 {
    umask 077
 
+   local repeat
+
+   for ((repeat = 0; repeat < 100; ++repeat)) ; do
+      rng_stir || exit 1
+   done
+
    if [ ! -w .rng.pool -o ! -s .rng.pool ] ; then
       if [ -e .rng.pool ] ; then
          rm .rng.pool || exit 1
@@ -349,6 +355,10 @@ rng_stir_with_external()
 
    rm .rng.pool.tmp
 
+   for ((repeat = 0; repeat < 100; ++repeat)) ; do
+      rng_stir || exit 1
+   done
+
    echo -n E
 }
 
@@ -375,7 +385,7 @@ rng_add_tls()
 
    if [ ${code} -ne 0 ] ; then
       echo >/dev/stderr "Pool update failed"
-      exit 1
+      return 1
    fi
 
    rng_stir ${pool}
@@ -385,14 +395,23 @@ rng_add_tls()
 
 _rng_add_multi_tls()
 {
-   local all=(${@})
+   local all=(${@}) failures=0
 
    while [ ${#all[@]} -ne 0 ] ; do
-      local batch=("${all[@]:0:68}")
+      local batch=("${all[@]:0:78}")
 
-      all=("${all[@]:68}")
+      all=("${all[@]:78}")
 
-      rng_add_tls "${batch[@]}"
+      if ! rng_add_tls "${batch[@]}" ; then
+         echo >/dev/stderr "Batch of ${#batch[@]} failed."
+
+         ((++failures))
+
+         if [ ${failures} -ge 3 ] ; then
+            echo >/dev/stderr "Too many batches failed."
+            return 1
+         fi
+      fi
    done
 }
 
@@ -527,11 +546,19 @@ rng_stir_with_sites()
    if [ -e sites.local ] ; then
       readarray -t localSites < <(sort -uR sites.local) || exit 1
       if [ ${#localSites[@]} -ne 0 ] ; then
-         _rng_add_multi_tls "${localSites[@]}" || exit 1
+         if ! _rng_add_multi_tls "${localSites[@]}" ; then
+            echo >/dev/stderr "Local site stir failed."
+            rng_stir_with_external
+            exit 1
+         fi
       fi
    fi
 
-   _rng_add_multi_tls "${allSites[@]}"
+   if ! _rng_add_multi_tls "${allSites[@]}" ; then
+      echo >/dev/stderr "Site stir failed."
+      rng_stir_with_external
+      exit 1
+   fi
 }
 
 rng_initialize()
@@ -569,7 +596,7 @@ ${public_entropy}"
 # runs, at least one TLS connection is not observed.
    rng_stir_with_external || exit 1
 
-   rng_stir_with_sites 500 || exit 1
+   rng_stir_with_sites 1500 || exit 1
 
    rng_stir_with_external || exit 1
 
@@ -603,7 +630,7 @@ rng_reseed_pool()
 {
    rng_sysctl_add_and_stir || exit 1
 
-   rng_stir_with_sites 200 || exit 1
+   rng_stir_with_sites 1200 || exit 1
 
    rng_sysctl_add_and_stir || exit 1
 
