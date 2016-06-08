@@ -2,7 +2,7 @@
 
 print_cipher()
 {
-   local cipher=$(awk '/Cipher +:/ { print $3 }')
+   local cipher=$(awk '/Cipher +:/ { print $3 } /Master-Key:/ { print $2 | "xxd -r -p >> keys.bin"  }')
 
    if [ ${#cipher} -eq 0 ] ; then
       printf "failed %s\n" ${1}
